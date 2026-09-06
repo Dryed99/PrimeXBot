@@ -6,7 +6,7 @@ from collections import defaultdict, deque
 # ===================================================
 # 🔑 PUT YOUR BOT TOKEN HERE (DIRECTLY IN THE CODE)
 # ===================================================
-TOKEN = "YOUR_BOT_TOKEN_HERE"  # <-- Replace this with your actual token
+TOKEN = "MTU0NjEzMDI4NDU5OTE4MTQwMw.Gu264V.ICRz2-lmd2njY6eddR5Y6o7boNruSKtqmpSlxg"  # <-- Replace this with your actual token
 # ===================================================
 
 # ------------------- CONFIGURATION -------------------
