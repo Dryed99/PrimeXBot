@@ -2,17 +2,17 @@ import discord
 from discord.ext import commands
 import asyncio
 from collections import defaultdict, deque
-import os  # <-- This will read your environment variable
+import os
 
 # ------------------- CONFIGURATION -------------------
 DEFAULT_ANTI_NUKE = True
-BAN_THRESHOLD = 5
-KICK_THRESHOLD = 5
-CHANNEL_CREATE_THRESHOLD = 5
-CHANNEL_DELETE_THRESHOLD = 5
-ROLE_CREATE_THRESHOLD = 5
-ROLE_DELETE_THRESHOLD = 5
-TIME_WINDOW = 10  # seconds
+BAN_THRESHOLD = 3          # 3 actions in 5 seconds = NUKE
+KICK_THRESHOLD = 3
+CHANNEL_CREATE_THRESHOLD = 3
+CHANNEL_DELETE_THRESHOLD = 3
+ROLE_CREATE_THRESHOLD = 3
+ROLE_DELETE_THRESHOLD = 3
+TIME_WINDOW = 5            # seconds
 # ---------------------------------------------------
 
 intents = discord.Intents.default()
@@ -23,12 +23,12 @@ intents.message_content = True
 
 bot = commands.Bot(command_prefix='!', intents=intents)
 
-# Store per-guild data
 guild_settings = {}
 action_timestamps = defaultdict(lambda: defaultdict(lambda: deque()))
 
-def is_admin(member):
-    return member.guild_permissions.administrator
+# IMPORTANT: Only the SERVER OWNER is safe. Everyone else (even admins) will be banned.
+def is_server_owner(member):
+    return member == member.guild.owner
 
 async def log_action(guild, message):
     settings = guild_settings.get(guild.id, {})
@@ -47,19 +47,43 @@ def check_rate_limit(guild_id, action_type, threshold):
     return len(timestamps) >= threshold
 
 async def punish_perpetrator(guild, user, reason):
+    # Try to ban the nuker
     try:
         await guild.ban(user, reason=reason)
         await log_action(guild, f"🔨 Banned {user.mention} ({user.id}) for: {reason}")
+        return True
     except discord.Forbidden:
-        await log_action(guild, f"❌ Could not ban {user.mention} – insufficient permissions.")
+        # If bot can't ban (role hierarchy issue), log it and try emergency mode
+        await log_action(guild, f"⚠️ COULD NOT BAN {user.mention}! Role hierarchy issue. Trying emergency lockdown...")
+        await emergency_lockdown(guild, user)
+        return False
     except Exception as e:
         await log_action(guild, f"⚠️ Error banning {user.mention}: {e}")
+        return False
+
+async def emergency_lockdown(guild, nuker):
+    """If nuker has higher role than bot, bot deletes all channels to stop the nuke."""
+    await log_action(guild, f"🚨 EMERGENCY LOCKDOWN ACTIVATED against {nuker}!")
+    
+    # Delete as many channels as possible to stop the spam
+    for channel in guild.channels:
+        try:
+            await channel.delete(reason=f"Emergency lockdown against nuke bot {nuker}")
+        except:
+            pass  # Ignore errors
+    
+    # Create a panic channel so owner can see what happened
+    try:
+        panic_channel = await guild.create_text_channel("🚨-PANIC-ROOM")
+        await panic_channel.send(f"🚨 Server nuked by {nuker}. I deleted all channels to stop the damage. Restore from backup if needed.")
+    except:
+        pass
 
 # ------------------- EVENTS -------------------
 
 @bot.event
 async def on_ready():
-    print(f'✅ Logged in as {bot.user}')
+    print(f'✅ Anti-Nuke Bot is ONLINE as {bot.user}')
 
 @bot.event
 async def on_member_ban(guild, user):
@@ -68,11 +92,11 @@ async def on_member_ban(guild, user):
         return
     async for entry in guild.audit_logs(action=discord.AuditLogAction.ban, limit=1):
         if entry.target.id == user.id:
-            perpetrator = entry.user
-            if is_admin(perpetrator):
-                return
+            perp = entry.user
+            if is_server_owner(perp):
+                return  # Server owner can do anything
             if check_rate_limit(guild.id, 'ban', BAN_THRESHOLD):
-                await punish_perpetrator(guild, perpetrator, f"Mass banning – {BAN_THRESHOLD} bans in {TIME_WINDOW}s")
+                await punish_perpetrator(guild, perp, f"Mass banning ({BAN_THRESHOLD} bans in {TIME_WINDOW}s)")
             break
 
 @bot.event
@@ -83,11 +107,11 @@ async def on_member_remove(member):
         return
     async for entry in guild.audit_logs(action=discord.AuditLogAction.kick, limit=1):
         if entry.target.id == member.id:
-            perpetrator = entry.user
-            if is_admin(perpetrator):
+            perp = entry.user
+            if is_server_owner(perp):
                 return
             if check_rate_limit(guild.id, 'kick', KICK_THRESHOLD):
-                await punish_perpetrator(guild, perpetrator, f"Mass kicking – {KICK_THRESHOLD} kicks in {TIME_WINDOW}s")
+                await punish_perpetrator(guild, perp, f"Mass kicking ({KICK_THRESHOLD} kicks in {TIME_WINDOW}s)")
             break
 
 @bot.event
@@ -98,11 +122,11 @@ async def on_guild_channel_create(channel):
         return
     async for entry in guild.audit_logs(action=discord.AuditLogAction.channel_create, limit=1):
         if entry.target.id == channel.id:
-            perpetrator = entry.user
-            if is_admin(perpetrator):
+            perp = entry.user
+            if is_server_owner(perp):
                 return
             if check_rate_limit(guild.id, 'channel_create', CHANNEL_CREATE_THRESHOLD):
-                await punish_perpetrator(guild, perpetrator, f"Mass channel creation – {CHANNEL_CREATE_THRESHOLD} creations in {TIME_WINDOW}s")
+                await punish_perpetrator(guild, perp, f"Mass channel creation ({CHANNEL_CREATE_THRESHOLD} in {TIME_WINDOW}s)")
             break
 
 @bot.event
@@ -113,11 +137,11 @@ async def on_guild_channel_delete(channel):
         return
     async for entry in guild.audit_logs(action=discord.AuditLogAction.channel_delete, limit=1):
         if entry.target.id == channel.id:
-            perpetrator = entry.user
-            if is_admin(perpetrator):
+            perp = entry.user
+            if is_server_owner(perp):
                 return
             if check_rate_limit(guild.id, 'channel_delete', CHANNEL_DELETE_THRESHOLD):
-                await punish_perpetrator(guild, perpetrator, f"Mass channel deletion – {CHANNEL_DELETE_THRESHOLD} deletions in {TIME_WINDOW}s")
+                await punish_perpetrator(guild, perp, f"Mass channel deletion ({CHANNEL_DELETE_THRESHOLD} in {TIME_WINDOW}s)")
             break
 
 @bot.event
@@ -128,11 +152,11 @@ async def on_guild_role_create(role):
         return
     async for entry in guild.audit_logs(action=discord.AuditLogAction.role_create, limit=1):
         if entry.target.id == role.id:
-            perpetrator = entry.user
-            if is_admin(perpetrator):
+            perp = entry.user
+            if is_server_owner(perp):
                 return
             if check_rate_limit(guild.id, 'role_create', ROLE_CREATE_THRESHOLD):
-                await punish_perpetrator(guild, perpetrator, f"Mass role creation – {ROLE_CREATE_THRESHOLD} creations in {TIME_WINDOW}s")
+                await punish_perpetrator(guild, perp, f"Mass role creation ({ROLE_CREATE_THRESHOLD} in {TIME_WINDOW}s)")
             break
 
 @bot.event
@@ -143,11 +167,11 @@ async def on_guild_role_delete(role):
         return
     async for entry in guild.audit_logs(action=discord.AuditLogAction.role_delete, limit=1):
         if entry.target.id == role.id:
-            perpetrator = entry.user
-            if is_admin(perpetrator):
+            perp = entry.user
+            if is_server_owner(perp):
                 return
             if check_rate_limit(guild.id, 'role_delete', ROLE_DELETE_THRESHOLD):
-                await punish_perpetrator(guild, perpetrator, f"Mass role deletion – {ROLE_DELETE_THRESHOLD} deletions in {TIME_WINDOW}s")
+                await punish_perpetrator(guild, perp, f"Mass role deletion ({ROLE_DELETE_THRESHOLD} in {TIME_WINDOW}s)")
             break
 
 # ------------------- COMMANDS -------------------
@@ -187,12 +211,9 @@ async def set_log(ctx, channel: discord.TextChannel = None):
 
 # ------------------- RUN -------------------
 if __name__ == '__main__':
-    # Read the token from the environment variable
     TOKEN = os.environ.get('DISCORD_TOKEN')
-    
     if TOKEN is None:
         print("❌ ERROR: DISCORD_TOKEN environment variable not set!")
-        print("👉 Run: export DISCORD_TOKEN='your_token_here' before starting the bot.")
     else:
         print("✅ Token found! Starting bot...")
         bot.run(TOKEN)
