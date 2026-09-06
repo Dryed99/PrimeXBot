@@ -2,12 +2,7 @@ import discord
 from discord.ext import commands
 import asyncio
 from collections import defaultdict, deque
-
-# ===================================================
-# 🔑 PUT YOUR BOT TOKEN HERE (DIRECTLY IN THE CODE)
-# ===================================================
-TOKEN = "MTU0NjEzMDI4NDU5OTE4MTQwMw.Gu264V.ICRz2-lmd2njY6eddR5Y6o7boNruSKtqmpSlxg"  # <-- Replace this with your actual token
-# ===================================================
+import os  # <-- This will read your environment variable
 
 # ------------------- CONFIGURATION -------------------
 DEFAULT_ANTI_NUKE = True
@@ -192,7 +187,12 @@ async def set_log(ctx, channel: discord.TextChannel = None):
 
 # ------------------- RUN -------------------
 if __name__ == '__main__':
-    if TOKEN == "MTU0NjEzMDI4NDU5OTE4MTQwMw.Gu264V.ICRz2-lmd2njY6eddR5Y6o7boNruSKtqmpSlxg":
-        print("❌ ERROR: You forgot to put your token in the code!")
+    # Read the token from the environment variable
+    TOKEN = os.environ.get('DISCORD_TOKEN')
+    
+    if TOKEN is None:
+        print("❌ ERROR: DISCORD_TOKEN environment variable not set!")
+        print("👉 Run: export DISCORD_TOKEN='your_token_here' before starting the bot.")
     else:
+        print("✅ Token found! Starting bot...")
         bot.run(TOKEN)
